@@ -9,6 +9,7 @@ class Image extends Bing
 {
     public $prefix = "images/async";
     public $raw_images, $related;
+    protected array $images;
 
     public function getContent()
     {

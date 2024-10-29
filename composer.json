@@ -3,6 +3,7 @@
     "description": "Bing scraper: Text, Image, Video",
     "type": "library",
     "require": {
+        "php": ">=7.4",
         "guzzlehttp/guzzle": ">=6.2.0",
         "symfony/dom-crawler": "^5",
         "symfony/css-selector": "^5"
