@@ -1,5 +1,5 @@
 {
-    "name": "buchin/bing",
+    "name": "in2code/bing",
     "description": "Bing scraper: Text, Image, Video",
     "type": "library",
     "require": {
