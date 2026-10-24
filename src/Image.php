@@ -9,11 +9,11 @@ class Image extends Bing
 {
     public $prefix = "images/async";
     public $raw_images, $related;
-    protected array $images;
+    public $images = [];
 
     public function getContent()
     {
-        $response = $this->client->get($this->prefix, [
+        $response = $this->client->request("GET", $this->prefix, [
             "query" => [
                 "q" => trim($this->fullQuery),
                 // 'adlt' => 'strict',
@@ -30,27 +30,41 @@ class Image extends Bing
 
     public function parseContent()
     {
-        $results = $this->crawler
-            ->filter(".imgpt")
-            ->each(function (Crawler $node, $i) {
-                $json = @json_decode($node->filter("a.iusc")->attr("m"));
-                try {
-                    $size = $node->filter("div.img_info span.nowrap")->html();
-                } catch (\InvalidArgumentException $e) {
-                    // I guess its InvalidArgumentException in this case
-                    $size = "0 x 0";
+        $results = $this->crawler->filter(".imgpt")->each(function ($node) {
+            $json = @json_decode($node->filter("a.iusc")->attr("m"));
+
+            if(is_null($json)){
+                return null;
+            }
+
+            try {
+                $size = $node->filter("div.img_info span.nowrap")->html();
+            } catch (\InvalidArgumentException $e) {
+                // I guess its InvalidArgumentException in this case
+                $size = "0 x 0";
+            }
+
+            try {
+                if (!isset($json->t) || empty($json->t) || !isset($json->desc) || empty($json->desc)) {
+                    return null;
                 }
 
-                $raw_image = [
+                return [
+                    "url" => $json->murl,
                     "mediaurl" => $json->murl,
                     "link" => $json->purl,
                     "title" => str_replace(["", "", " ..."], "", $json->t),
                     "thumbnail" => $json->turl,
                     "size" => $size,
+                    "desc" => $json->desc,
                 ];
+            }
+            catch (\Exception $e){
+                return [];
+            }
+        });
 
-                return $raw_image;
-            });
+        $results = $this->uniqueByUrl(array_filter($results));
 
         $related = $this->crawler
             ->filter("a > div.cardInfo > div > strong")
@@ -80,9 +94,9 @@ class Image extends Bing
 
     public function postProcessSingleImage($raw_image, $delimiter = "·")
     {
-        $raw_image["filetype"] = trim(
-            @explode($delimiter, $raw_image["size"])[1] ?? ''
-        );
+        $urlparts = @explode($delimiter, $raw_image["url"]);
+
+        $raw_image["filetype"] = $urlparts[count($urlparts)-1];
         $raw_image["filetype"] =
             $raw_image["filetype"] == "jpeg" ? "jpg" : $raw_image["filetype"];
         $raw_image["filetype"] =
@@ -90,17 +104,61 @@ class Image extends Bing
                 ? "gif"
                 : $raw_image["filetype"];
 
-        $raw_image["width"] = explode(
-            " x ",
-            @explode($delimiter, $raw_image["size"])[0]
-        )[0] ?? 0;
-        $raw_image["height"] = explode(
-            " x ",
-            @explode($delimiter, $raw_image["size"])[0]
-        )[1] ?? 0;
+        // Check if filetype is successfully extracted
+        if (mb_strlen($raw_image["filetype"]) > 5) {
+            // filetype length is usually 3-5 chars, lets find it from URL;
+            $raw_image["filetype"] = $this->extensionFromUrl($raw_image["url"]);
+        }
+
+        try {
+            $sizeParts = explode($delimiter, $raw_image["size"]);
+            $dimensions = isset($sizeParts[0]) ? explode("×", $sizeParts[0]) : [];
+
+            $raw_image["width"] = isset($dimensions[0]) ? (int) $dimensions[0] : 0;
+            $raw_image["height"] = isset($dimensions[1]) ? (int) $dimensions[1] : 0;
+        }
+        catch (\Exception $e)
+        {
+            $raw_image["width"] = 0;
+            $raw_image["height"] = 0;
+        }
+
         $raw_image["domain"] = parse_url($raw_image["link"], PHP_URL_HOST);
 
         return $raw_image;
+    }
+
+    /**
+     * Removes entries with a duplicate "url" (first one wins, keys are kept).
+     */
+    protected function uniqueByUrl(array $items)
+    {
+        $seen = [];
+        $unique = [];
+
+        foreach ($items as $key => $item) {
+            if (isset($seen[$item["url"]])) {
+                continue;
+            }
+
+            $seen[$item["url"]] = true;
+            $unique[$key] = $item;
+        }
+
+        return $unique;
+    }
+
+    /**
+     * Part after the last "." and before the first "?" of the remainder.
+     */
+    protected function extensionFromUrl($url)
+    {
+        $pos = strrpos($url, ".");
+        $extension = $pos === false ? $url : substr($url, $pos + 1);
+
+        $pos = strpos($extension, "?");
+
+        return $pos === false ? $extension : substr($extension, 0, $pos);
     }
 
     public function getImages()
